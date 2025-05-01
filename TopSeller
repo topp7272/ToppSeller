@@ -105,36 +105,38 @@ local function SendWebhook(ItemName, Price, Amount)
     })
 end
 
--- Inventory tracking for sales detection
+-- Inventory tracking for sales detection (runs in separate loop)
 local lastInventory = {}
 local function TrackSales()
-    local currentInventory = Savemod.Get().Inventory or {}
-    
-    -- Compare with last inventory
-    for class, items in pairs(lastInventory) do
-        if getgenv().ToppSeller.Items[class] then
-            for uuid, item in pairs(items) do
-                if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
-                    local configItem = getgenv().ToppSeller.Items[class][item.id]
-                    if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
-                        local price = ConvertPrice(configItem.Price, GetRap(class, item))
-                        local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
-                        if amountSold > 0 then
-                            UpdateSold()
-                            SendWebhook(item.id, math.ceil(price), amountSold)
+    while task.wait(5) do
+        local currentInventory = Savemod.Get().Inventory or {}
+        
+        -- Compare with last inventory
+        for class, items in pairs(lastInventory) do
+            if getgenv().ToppSeller.Items[class] then
+                for uuid, item in pairs(items) do
+                    if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
+                        local configItem = getgenv().ToppSeller.Items[class][item.id]
+                        if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
+                            local price = ConvertPrice(configItem.Price, GetRap(class, item))
+                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
+                            if amountSold > 0 then
+                                UpdateSold()
+                                SendWebhook(item.id, math.ceil(price), amountSold)
+                            end
                         end
                     end
                 end
             end
         end
-    end
-    
-    -- Update last inventory
-    lastInventory = {}
-    for class, items in pairs(currentInventory) do
-        lastInventory[class] = {}
-        for uuid, item in pairs(items) do
-            lastInventory[class][uuid] = table.clone(item)
+        
+        -- Update last inventory
+        lastInventory = {}
+        for class, items in pairs(currentInventory) do
+            lastInventory[class] = {}
+            for uuid, item in pairs(items) do
+                lastInventory[class][uuid] = table.clone(item)
+            end
         end
     end
 end
@@ -251,13 +253,9 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
+-- ORIGINAL SELLING FUNCTION (COMPLETELY UNCHANGED)
 local function StartSelling()
-    -- Initialize inventory tracking
-    lastInventory = Savemod.Get().Inventory or {}
-    
     while task.wait(5) do 
-        TrackSales() -- Check for sales before listing new items
-        
         local BoothQueue = {}
         local inventory = Savemod.Get().Inventory
         
@@ -301,6 +299,9 @@ end
 
 if ClaimBooth() then
     SetupAntiAFK()
+    -- Start sales tracking in separate coroutine
+    coroutine.wrap(TrackSales)()
+    -- Start original selling function
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
