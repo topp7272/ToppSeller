@@ -1,28 +1,24 @@
--- Check if the config exists
 if not getgenv().ToppSeller then
-    warn("[ToppSeller] Config not found! Make sure you set getgenv().ToppSeller before loading this script")
+    warn("[ToppSeller] Config not found!")
     return
 end
 
--- Wait for game to load
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
 
--- Library setup
 local Library = game.ReplicatedStorage:FindFirstChild("Library")
 if not Library then
-    warn("[ToppSeller] Library not found in ReplicatedStorage!")
+    warn("[ToppSeller] Library not found!")
     return
 end
 
 local Client = Library:FindFirstChild("Client")
 if not Client then
-    warn("[ToppSeller] Client folder not found in Library!")
+    warn("[ToppSeller] Client folder not found!")
     return
 end
 
--- Required modules
 local function requireModule(name)
     local module = Client:FindFirstChild(name)
     if not module then
@@ -40,7 +36,6 @@ if not (RAPCmds and Network and Savemod) then
     return
 end
 
--- Auto travel to trading plaza
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     while true do 
         Network.Invoke("Travel to Trading Plaza") 
@@ -48,7 +43,27 @@ if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     end
 end
 
--- Helper functions
+local function SendWebhook(ItemName, Price, Amount)
+    if getgenv().ToppSeller.Webhook == "" then return end
+    
+    local data = {
+        ["content"] = "🎉 New Sale!",
+        ["embeds"] = {{
+            ["title"] = "**" .. ItemName .. "** sold!",
+            ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
+            ["color"] = 65280,
+            ["footer"] = {["text"] = "ToppSeller | " .. os.date("%X")}
+        }}
+    }
+    
+    request({
+        Url = getgenv().ToppSeller.Webhook,
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = game:GetService("HttpService"):JSONEncode(data)
+    })
+end
+
 local GetRap = function(Class, ItemTable)
     local itemModule = Library.Items:FindFirstChild(Class .. "Item")
     if not itemModule then return 0 end
@@ -72,7 +87,6 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
--- Booth claiming system
 local function ClaimBooth()
     local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
@@ -93,20 +107,19 @@ local function ClaimBooth()
     if not HaveBooth then
         LocalPlayer.Character.HumanoidRootPart.CFrame = BoothSpawns.Table.CFrame * CFrame.new(5, 0, 0)
         Network.Invoke("Booths_ClaimBooth", tostring(BoothSpawns:GetAttribute("ID")))
-        task.wait(2) -- Give time for booth to be claimed
+        task.wait(2)
     end
     
     return true
 end
 
--- Anti-AFK and disconnect prevention
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
         v:Disable() 
     end
     LocalPlayer.Idled:Connect(function() 
-        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) 
+        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000)) 
     end)
 
     local old
@@ -123,7 +136,6 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- Main selling loop
 local function StartSelling()
     while task.wait(5) do 
         local BoothQueue = {}
@@ -141,6 +153,7 @@ local function StartSelling()
                     local configItem = getgenv().ToppSeller.Items[Class][v.id]
                     if configItem and configItem.pt == v.pt and configItem.sh == v.sh and configItem.tn == v.tn then
                         table.insert(BoothQueue, {
+                            Name = v.id,
                             Price = configItem.Price, 
                             UUID = _, 
                             Item = v, 
@@ -156,13 +169,20 @@ local function StartSelling()
         for _, v in ipairs(BoothQueue) do
             local price = ConvertPrice(v.Price, v.Rap)
             local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / price))
-            Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
+            
+            local success = pcall(function()
+                Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
+            end)
+            
+            if success then
+                SendWebhook(v.Name, math.ceil(price), MaxAmount)
+            end
+            
             task.wait(1)
         end
     end
 end
 
--- Initialize
 if ClaimBooth() then
     SetupAntiAFK()
     StartSelling()
