@@ -10,7 +10,7 @@ ScreenGui.IgnoreGuiInset = true
 
 local Background = Instance.new("Frame", ScreenGui)
 Background.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-Background.BackgroundTransparency = 0.1 -- 90% opacity
+Background.BackgroundTransparency = 0.1
 Background.BorderColor3 = Color3.fromRGB(255, 0, 255)
 Background.Size = UDim2.new(1, 0, 1, 0)
 Background.Position = UDim2.new(0, 0, 0, 0)
@@ -79,8 +79,8 @@ game:GetService("RunService").Heartbeat:Connect(function()
 end)
 
 local itemsSold = 0
-local function UpdateSold()
-    itemsSold = itemsSold + 1
+local function UpdateSold(amount)
+    itemsSold = itemsSold + (amount or 1)
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
@@ -105,42 +105,37 @@ local function SendWebhook(ItemName, Price, Amount)
     })
 end
 
--- Inventory tracking for sales detection (runs in separate loop)
-local lastInventory = {}
-local function TrackSales()
-    while task.wait(5) do
-        local currentInventory = Savemod.Get().Inventory or {}
-        
-        -- Compare with last inventory
-        for class, items in pairs(lastInventory) do
-            if getgenv().ToppSeller.Items[class] then
-                for uuid, item in pairs(items) do
-                    if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
-                        local configItem = getgenv().ToppSeller.Items[class][item.id]
-                        if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
-                            local price = ConvertPrice(configItem.Price, GetRap(class, item))
-                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
-                            if amountSold > 0 then
-                                UpdateSold()
-                                SendWebhook(item.id, math.ceil(price), amountSold)
-                            end
-                        end
-                    end
-                end
+-- Listen for booth transactions
+local function SetupBoothListener()
+    local function findMyBooth()
+        for _, booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
+            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
+                return booth
             end
         end
-        
-        -- Update last inventory
-        lastInventory = {}
-        for class, items in pairs(currentInventory) do
-            lastInventory[class] = {}
-            for uuid, item in pairs(items) do
-                lastInventory[class][uuid] = table.clone(item)
-            end
+        return nil
+    end
+
+    while task.wait(5) do
+        local myBooth = findMyBooth()
+        if myBooth then
+            myBooth.Info.Transactions.ChildAdded:Connect(function(transaction)
+                task.wait(0.5) -- Wait for values to load
+                local itemName = transaction:FindFirstChild("ItemName")
+                local price = transaction:FindFirstChild("Price")
+                local amount = transaction:FindFirstChild("Amount")
+                
+                if itemName and price and amount then
+                    UpdateSold(amount.Value)
+                    SendWebhook(itemName.Value, price.Value, amount.Value)
+                end
+            end)
+            break
         end
     end
 end
 
+-- [REST OF YOUR ORIGINAL SCRIPT FOLLOWS EXACTLY AS BEFORE]
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
@@ -253,7 +248,6 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- ORIGINAL SELLING FUNCTION (COMPLETELY UNCHANGED)
 local function StartSelling()
     while task.wait(5) do 
         local BoothQueue = {}
@@ -299,10 +293,8 @@ end
 
 if ClaimBooth() then
     SetupAntiAFK()
-    -- Start sales tracking in separate coroutine
-    coroutine.wrap(TrackSales)()
-    -- Start original selling function
-    StartSelling()
+    coroutine.wrap(SetupBoothListener)() -- Start listening for sales
+    StartSelling() -- Start original selling process
 else
     warn("[ToppSeller] Failed to claim booth!")
 end
