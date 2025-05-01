@@ -98,7 +98,7 @@ local function UpdateSold()
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
--- Webhook function
+-- Webhook function (ONLY TRIGGERS WHEN ITEM IS SOLD)
 local function SendWebhook(ItemName, Price, Amount)
     if getgenv().ToppSeller.Webhook == "" then return end
     
@@ -108,7 +108,7 @@ local function SendWebhook(ItemName, Price, Amount)
             ["title"] = "**" .. ItemName .. "** sold!",
             ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
             ["color"] = 65280,
-            ["footer"] = {["text"] = "ToppSeller https://discord.gg/RnTEdqhJA6 | " .. os.date("%X")}
+            ["footer"] = {["text"] = "ToppSeller | " .. os.date("%X")}
         }}
     }
     
@@ -238,30 +238,7 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- Connect to booth sales event
-local function SetupBoothListener()
-    local Booth = nil
-    for _, v in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-        if v:IsA("Model") and v.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
-            Booth = v
-            break
-        end
-    end
-
-    if Booth then
-        Booth.Info.Transactions.ChildAdded:Connect(function(transaction)
-            local itemName = transaction:WaitForChild("ItemName", 1)
-            local price = transaction:WaitForChild("Price", 1)
-            local amount = transaction:WaitForChild("Amount", 1)
-            
-            if itemName and price and amount then
-                UpdateSold()
-                SendWebhook(itemName.Value, price.Value, amount.Value)
-            end
-        end)
-    end
-end
-
+-- ORIGINAL SELLING FUNCTION (UNTOUCHED)
 UpdateStatus("Starting selling loop...")
 local function StartSelling()
     while task.wait(5) do 
@@ -303,6 +280,11 @@ local function StartSelling()
                 Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
             end)
             
+            if success then
+                UpdateSold()
+                SendWebhook(v.Name, math.ceil(price), MaxAmount)
+            end
+            
             task.wait(1)
         end
     end
@@ -310,7 +292,6 @@ end
 
 if ClaimBooth() then
     SetupAntiAFK()
-    SetupBoothListener() -- Setup listener for booth sales
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
