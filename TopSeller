@@ -3,13 +3,14 @@ if not getgenv().ToppSeller then
     return
 end
 
--- Create full-screen UI
+-- Create full-screen UI with 90% opacity
 local ScreenGui = Instance.new("ScreenGui", game.Players.LocalPlayer.PlayerGui)
 ScreenGui.Name = "ToppSellerUI"
 ScreenGui.IgnoreGuiInset = true
 
 local Background = Instance.new("Frame", ScreenGui)
 Background.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Background.BackgroundTransparency = 0.1 -- 90% opacity
 Background.BorderColor3 = Color3.fromRGB(255, 0, 255)
 Background.Size = UDim2.new(1, 0, 1, 0)
 Background.Position = UDim2.new(0, 0, 0, 0)
@@ -53,14 +54,6 @@ TimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TimerLabel.BackgroundTransparency = 1
 TimerLabel.Size = UDim2.new(1, 0, 0, 40)
 
-local StatusLabel = Instance.new("TextLabel", Frame)
-StatusLabel.Text = "Status: Initializing..."
-StatusLabel.Font = Enum.Font.FredokaOne
-StatusLabel.TextSize = 32
-StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Size = UDim2.new(1, 0, 0, 40)
-
 local SoldLabel = Instance.new("TextLabel", Frame)
 SoldLabel.Text = "Sold: 0"
 SoldLabel.Font = Enum.Font.FredokaOne
@@ -69,12 +62,14 @@ SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 SoldLabel.BackgroundTransparency = 1
 SoldLabel.Size = UDim2.new(1, 0, 0, 40)
 
+-- RGB Timer Effect
 local hue = 0
 game:GetService("RunService").Heartbeat:Connect(function(delta)
     hue = (hue + delta * 60) % 360
     TimerLabel.TextColor3 = Color3.fromHSV(hue/360, 1, 1)
 end)
 
+-- Timer Functionality
 local startTime = os.time()
 game:GetService("RunService").Heartbeat:Connect(function()
     local elapsed = os.time() - startTime
@@ -82,10 +77,6 @@ game:GetService("RunService").Heartbeat:Connect(function()
     local seconds = elapsed % 60
     TimerLabel.Text = string.format("%02d:%02d", minutes, seconds)
 end)
-
-local function UpdateStatus(text)
-    StatusLabel.Text = "Status: " .. text
-end
 
 local itemsSold = 0
 local function UpdateSold()
@@ -114,11 +105,43 @@ local function SendWebhook(ItemName, Price, Amount)
     })
 end
 
+-- Inventory tracking for sales detection
+local lastInventory = {}
+local function TrackSales()
+    local currentInventory = Savemod.Get().Inventory or {}
+    
+    -- Compare with last inventory
+    for class, items in pairs(lastInventory) do
+        if getgenv().ToppSeller.Items[class] then
+            for uuid, item in pairs(items) do
+                if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
+                    local configItem = getgenv().ToppSeller.Items[class][item.id]
+                    if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
+                        local price = ConvertPrice(configItem.Price, GetRap(class, item))
+                        local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
+                        if amountSold > 0 then
+                            UpdateSold()
+                            SendWebhook(item.id, math.ceil(price), amountSold)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Update last inventory
+    lastInventory = {}
+    for class, items in pairs(currentInventory) do
+        lastInventory[class] = {}
+        for uuid, item in pairs(items) do
+            lastInventory[class][uuid] = table.clone(item)
+        end
+    end
+end
+
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
-
-UpdateStatus("Loading libraries...")
 
 local Library = game.ReplicatedStorage:FindFirstChild("Library")
 if not Library then
@@ -150,7 +173,6 @@ if not (RAPCmds and Network and Savemod) then
 end
 
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
-    UpdateStatus("Traveling to plaza...")
     while true do 
         Network.Invoke("Travel to Trading Plaza") 
         task.wait(1) 
@@ -180,7 +202,6 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
-UpdateStatus("Claiming booth...")
 local function ClaimBooth()
     local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
@@ -207,7 +228,6 @@ local function ClaimBooth()
     return true
 end
 
-UpdateStatus("Setting up anti-AFK...")
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
@@ -231,38 +251,14 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- Booth sales listener
-local function SetupSalesListener()
-    local Booth = nil
-    for _, v in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-        if v:IsA("Model") and v.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
-            Booth = v
-            break
-        end
-    end
-
-    if Booth then
-        Booth.Info.Transactions.ChildAdded:Connect(function(transaction)
-            task.wait(0.5) -- Wait for values to load
-            local itemName = transaction:FindFirstChild("ItemName")
-            local price = transaction:FindFirstChild("Price")
-            local amount = transaction:FindFirstChild("Amount")
-            
-            if itemName and price and amount then
-                UpdateSold()
-                SendWebhook(itemName.Value, price.Value, amount.Value)
-            end
-        end)
-    end
-end
-
-UpdateStatus("Starting selling loop...")
 local function StartSelling()
-    SetupSalesListener() -- Start listening for actual sales
+    -- Initialize inventory tracking
+    lastInventory = Savemod.Get().Inventory or {}
     
     while task.wait(5) do 
+        TrackSales() -- Check for sales before listing new items
+        
         local BoothQueue = {}
-        UpdateStatus("Scanning inventory...")
         local inventory = Savemod.Get().Inventory
         
         if not inventory then
@@ -290,7 +286,6 @@ local function StartSelling()
 
         table.sort(BoothQueue, function(a, b) return a.Rap > b.Rap end)
         
-        UpdateStatus("Listing items...")
         for _, v in ipairs(BoothQueue) do
             local price = ConvertPrice(v.Price, v.Rap)
             local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / price))
