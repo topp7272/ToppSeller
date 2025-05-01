@@ -3,7 +3,6 @@ if not getgenv().ToppSeller then
     return
 end
 
--- Create full-screen UI with 90% opacity
 local ScreenGui = Instance.new("ScreenGui", game.Players.LocalPlayer.PlayerGui)
 ScreenGui.Name = "ToppSellerUI"
 ScreenGui.IgnoreGuiInset = true
@@ -62,14 +61,12 @@ SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 SoldLabel.BackgroundTransparency = 1
 SoldLabel.Size = UDim2.new(1, 0, 0, 40)
 
--- RGB Timer Effect
 local hue = 0
 game:GetService("RunService").Heartbeat:Connect(function(delta)
     hue = (hue + delta * 60) % 360
     TimerLabel.TextColor3 = Color3.fromHSV(hue/360, 1, 1)
 end)
 
--- Timer Functionality
 local startTime = os.time()
 game:GetService("RunService").Heartbeat:Connect(function()
     local elapsed = os.time() - startTime
@@ -84,9 +81,15 @@ local function UpdateSold(amount)
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
--- Improved webhook system
+local lastWebhookSent = {}
 local function SendWebhook(ItemName, Price, Amount)
     if getgenv().ToppSeller.Webhook == "" then return end
+    
+    local key = ItemName..tostring(Price)..tostring(Amount)
+    if lastWebhookSent[key] and (os.time() - lastWebhookSent[key]) < 10 then
+        return
+    end
+    lastWebhookSent[key] = os.time()
     
     local data = {
         ["content"] = "🎉 New Sale!",
@@ -99,7 +102,7 @@ local function SendWebhook(ItemName, Price, Amount)
     }
     
     local success, err = pcall(function()
-        return request({
+        request({
             Url = getgenv().ToppSeller.Webhook,
             Method = "POST",
             Headers = {["Content-Type"] = "application/json"},
@@ -112,20 +115,65 @@ local function SendWebhook(ItemName, Price, Amount)
     end
 end
 
--- Inventory tracking for sales detection
+local listedItems = {}
+local function TrackListings()
+    local function getMyBooth()
+        for _, booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
+            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName.."'s Booth!" then
+                return booth
+            end
+        end
+        return nil
+    end
+
+    while task.wait(0.5) do
+        local myBooth = getMyBooth()
+        if myBooth then
+            local currentListings = {}
+            for _, listing in ipairs(myBooth.Info.Listings:GetChildren()) do
+                if listing:FindFirstChild("ItemUID") then
+                    currentListings[listing.ItemUID.Value] = true
+                end
+            end
+            
+            for uid, _ in pairs(listedItems) do
+                if not currentListings[uid] then
+                    local itemData = Savemod.Get().Inventory
+                    for class, items in pairs(itemData) do
+                        if items[uid] then
+                            local item = items[uid]
+                            local configItem = getgenv().ToppSeller.Items[class][item.id]
+                            if configItem then
+                                local price = ConvertPrice(configItem.Price, GetRap(class, item))
+                                UpdateSold(1)
+                                SendWebhook(item.id, math.ceil(price), 1)
+                            end
+                        end
+                    end
+                    listedItems[uid] = nil
+                end
+            end
+            
+            for uid, _ in pairs(currentListings) do
+                listedItems[uid] = true
+            end
+        end
+    end
+end
+
 local lastInventory = {}
-local function TrackSales()
-    while task.wait(5) do
+local function TrackInventoryChanges()
+    while task.wait(0.5) do
         local currentInventory = Savemod.Get().Inventory or {}
         
         for class, items in pairs(lastInventory) do
             if getgenv().ToppSeller.Items[class] then
-                for uuid, item in pairs(items) do
-                    if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
+                for uid, item in pairs(items) do
+                    if not currentInventory[class] or not currentInventory[class][uid] or currentInventory[class][uid]._am < item._am then
                         local configItem = getgenv().ToppSeller.Items[class][item.id]
                         if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
                             local price = ConvertPrice(configItem.Price, GetRap(class, item))
-                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
+                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uid] and currentInventory[class][uid]._am or 0)
                             if amountSold > 0 then
                                 UpdateSold(amountSold)
                                 SendWebhook(item.id, math.ceil(price), amountSold)
@@ -139,19 +187,17 @@ local function TrackSales()
         lastInventory = {}
         for class, items in pairs(currentInventory) do
             lastInventory[class] = {}
-            for uuid, item in pairs(items) do
-                lastInventory[class][uuid] = table.clone(item)
+            for uid, item in pairs(items) do
+                lastInventory[class][uid] = table.clone(item)
             end
         end
     end
 end
 
--- Wait for game to load
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
 
--- Load required modules
 local Library = game.ReplicatedStorage:FindFirstChild("Library")
 if not Library then
     warn("[ToppSeller] Library not found!")
@@ -181,7 +227,6 @@ if not (RAPCmds and Network and Savemod) then
     return
 end
 
--- Travel to plaza if needed
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     while true do 
         Network.Invoke("Travel to Trading Plaza") 
@@ -189,7 +234,6 @@ if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     end
 end
 
--- RAP calculation
 local GetRap = function(Class, ItemTable)
     local itemModule = Library.Items:FindFirstChild(Class .. "Item")
     if not itemModule then return 0 end
@@ -203,7 +247,6 @@ local GetRap = function(Class, ItemTable)
     return RAPCmds.Get(Item) or 0
 end
 
--- Price conversion
 local ConvertPrice = function(Price, Rap)
     if type(Price) == "string" then
         local Percentage = tonumber(Price:match("^(%d+)%%"))
@@ -214,7 +257,6 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
--- Booth claiming
 local function ClaimBooth()
     local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
@@ -241,7 +283,6 @@ local function ClaimBooth()
     return true
 end
 
--- Anti-AFK
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
@@ -265,7 +306,6 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- Main selling function
 local function StartSelling()
     lastInventory = Savemod.Get().Inventory or {}
     
@@ -311,10 +351,10 @@ local function StartSelling()
     end
 end
 
--- Start everything
 if ClaimBooth() then
     SetupAntiAFK()
-    coroutine.wrap(TrackSales)()
+    coroutine.wrap(TrackListings)()
+    coroutine.wrap(TrackInventoryChanges)()
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
