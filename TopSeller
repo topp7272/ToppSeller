@@ -60,7 +60,7 @@ TimerLabel.BackgroundTransparency = 1
 TimerLabel.Size = UDim2.new(1, 0, 0, 40)
 
 local SoldLabel = Instance.new("TextLabel", Frame)
-SoldLabel.Text = "Sold: 0"
+SoldLabel.Text = "Diamonds: 0"
 SoldLabel.Font = Enum.Font.FredokaOne
 SoldLabel.TextSize = 32
 SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -80,19 +80,26 @@ game:GetService("RunService").Heartbeat:Connect(function(delta)
 end)
 
 -- Core Variables
-local itemsSold = 0
-local lastCounts = {}
+local totalDiamonds = 0
+local lastDiamonds = 0
 
--- Webhook Function
-local function SendWebhook(ItemName, Price, Amount)
+-- Helper function to format numbers with commas
+local function formatNumber(n)
+    return tostring(n):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
+end
+
+-- Webhook Function (Diamond Tracking)
+local function SendWebhook(amountGained)
     if not getgenv().ToppSeller.Webhook then return end
     
     local data = {
         ["content"] = "@everyone",
         ["embeds"] = {{
-            ["title"] = "**"..ItemName.."** SOLD!",
-            ["description"] = string.format("💰 **Price:** %s\n🔢 **Amount:** %s", Price, Amount),
-            ["color"] = 65280,
+            ["title"] = "💎 DIAMONDS GAINED! 💎",
+            ["description"] = string.format("+ **%s** Diamonds\n\nTotal: **%s** Diamonds", 
+                formatNumber(amountGained), 
+                formatNumber(totalDiamonds)),
+            ["color"] = 5814783, -- Light blue color for diamonds
             ["footer"] = {["text"] = "ToppSeller | "..os.date("%X")}
         }}
     }
@@ -111,46 +118,32 @@ local function SendWebhook(ItemName, Price, Amount)
     end
 end
 
--- Inventory Tracker (Precise Count System)
-local function TrackItemCounts()
-    while task.wait(0.5) do
-        local currentCounts = {}
+-- Diamond Tracker
+local function TrackDiamonds()
+    while task.wait(1) do
+        local currentDiamonds = 0
         local inventory = game:GetService("ReplicatedStorage").Library.Client.Save.Get().Inventory or {}
         
-        -- Initialize counts for all configured pets
-        for petName, _ in pairs(getgenv().ToppSeller.Items.Pet or {}) do
-            currentCounts[petName] = 0
-        end
-
-        -- Count current inventory
-        for _, item in pairs(inventory.Pet or {}) do
-            if getgenv().ToppSeller.Items.Pet[item.id] then
-                currentCounts[item.id] = (currentCounts[item.id] or 0) + (item._am or 1)
+        -- Find diamonds in currency
+        for _, currency in pairs(inventory.Currency or {}) do
+            if currency.id == "Diamonds" then
+                currentDiamonds = currency._am or 0
+                break
             end
         end
 
-        -- Detect sales by count difference
-        for petName, currentAmount in pairs(currentCounts) do
-            local lastAmount = lastCounts[petName] or currentAmount
-            if currentAmount < lastAmount then
-                local soldCount = lastAmount - currentAmount
-                local config = getgenv().ToppSeller.Items.Pet[petName]
-                local price = type(config.Price) == "string" 
-                    and (tonumber(config.Price:match("(%d+)%%"))/100) * GetRap("Pet", {id = petName}) 
-                    or config.Price
-                
-                SendWebhook(petName, math.floor(price), soldCount)
-                UpdateSold(soldCount)
-            end
+        -- Update UI
+        totalDiamonds = currentDiamonds
+        SoldLabel.Text = "Diamonds: " .. formatNumber(currentDiamonds)
+
+        -- Check for increase
+        if currentDiamonds > lastDiamonds and lastDiamonds > 0 then
+            local gained = currentDiamonds - lastDiamonds
+            SendWebhook(gained)
         end
 
-        lastCounts = currentCounts
+        lastDiamonds = currentDiamonds
     end
-end
-
-local function UpdateSold(amount)
-    itemsSold = itemsSold + (amount or 1)
-    SoldLabel.Text = "Sold: " .. itemsSold
 end
 
 -- Game Setup
@@ -238,7 +231,7 @@ end
 -- Main Execution
 if ClaimBooth() then
     SetupAntiAFK()
-    coroutine.wrap(TrackItemCounts)()
+    coroutine.wrap(TrackDiamonds)()
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
