@@ -11,11 +11,10 @@ ScreenGui.IgnoreGuiInset = true
 local Background = Instance.new("Frame", ScreenGui)
 Background.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 Background.BorderColor3 = Color3.fromRGB(255, 0, 255)
-Background.Size = UDim2.new(1, -20, 1, -20) -- Full screen with small margin
-Background.Position = UDim2.new(0, 10, 0, 10)
+Background.Size = UDim2.new(1, 0, 1, 0)
+Background.Position = UDim2.new(0, 0, 0, 0)
 Background.BorderMode = Enum.BorderMode.Inset
 
--- Close button
 local CloseButton = Instance.new("TextButton", Background)
 CloseButton.Text = "X"
 CloseButton.Font = Enum.Font.FredokaOne
@@ -29,8 +28,8 @@ CloseButton.MouseButton1Click:Connect(function()
 end)
 
 local Frame = Instance.new("Frame", Background)
-Frame.Size = UDim2.new(1, -20, 1, -20)
-Frame.Position = UDim2.new(0, 10, 0, 10)
+Frame.Size = UDim2.new(0.8, 0, 0.8, 0)
+Frame.Position = UDim2.new(0.1, 0, 0.1, 0)
 Frame.BackgroundTransparency = 1
 
 local ListLayout = Instance.new("UIListLayout", Frame)
@@ -38,47 +37,44 @@ ListLayout.Padding = UDim.new(0, 10)
 ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 ListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 
--- UI Elements
 local Title = Instance.new("TextLabel", Frame)
 Title.Text = "TOPP SELLER"
 Title.Font = Enum.Font.FredokaOne
-Title.TextSize = 32
+Title.TextSize = 36
 Title.TextColor3 = Color3.fromRGB(255, 0, 255)
 Title.BackgroundTransparency = 1
-Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Size = UDim2.new(1, 0, 0, 50)
 
 local TimerLabel = Instance.new("TextLabel", Frame)
 TimerLabel.Text = "00:00"
 TimerLabel.Font = Enum.Font.FredokaOne
-TimerLabel.TextSize = 28
+TimerLabel.TextSize = 32
 TimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TimerLabel.BackgroundTransparency = 1
-TimerLabel.Size = UDim2.new(1, 0, 0, 35)
+TimerLabel.Size = UDim2.new(1, 0, 0, 40)
 
 local StatusLabel = Instance.new("TextLabel", Frame)
 StatusLabel.Text = "Status: Initializing..."
 StatusLabel.Font = Enum.Font.FredokaOne
-StatusLabel.TextSize = 28
+StatusLabel.TextSize = 32
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Size = UDim2.new(1, 0, 0, 35)
+StatusLabel.Size = UDim2.new(1, 0, 0, 40)
 
 local SoldLabel = Instance.new("TextLabel", Frame)
 SoldLabel.Text = "Sold: 0"
 SoldLabel.Font = Enum.Font.FredokaOne
-SoldLabel.TextSize = 28
+SoldLabel.TextSize = 32
 SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 SoldLabel.BackgroundTransparency = 1
-SoldLabel.Size = UDim2.new(1, 0, 0, 35)
+SoldLabel.Size = UDim2.new(1, 0, 0, 40)
 
--- RGB Timer Effect
 local hue = 0
 game:GetService("RunService").Heartbeat:Connect(function(delta)
     hue = (hue + delta * 60) % 360
     TimerLabel.TextColor3 = Color3.fromHSV(hue/360, 1, 1)
 end)
 
--- Timer Functionality
 local startTime = os.time()
 game:GetService("RunService").Heartbeat:Connect(function()
     local elapsed = os.time() - startTime
@@ -87,7 +83,6 @@ game:GetService("RunService").Heartbeat:Connect(function()
     TimerLabel.Text = string.format("%02d:%02d", minutes, seconds)
 end)
 
--- Update Functions
 local function UpdateStatus(text)
     StatusLabel.Text = "Status: " .. text
 end
@@ -98,7 +93,6 @@ local function UpdateSold()
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
--- Webhook function (ONLY TRIGGERS WHEN ITEM IS SOLD)
 local function SendWebhook(ItemName, Price, Amount)
     if getgenv().ToppSeller.Webhook == "" then return end
     
@@ -120,7 +114,6 @@ local function SendWebhook(ItemName, Price, Amount)
     })
 end
 
--- Main script
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
@@ -238,9 +231,35 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
--- ORIGINAL SELLING FUNCTION (UNTOUCHED)
+-- Booth sales listener
+local function SetupSalesListener()
+    local Booth = nil
+    for _, v in ipairs(workspace.__THINGS.Booths:GetChildren()) do
+        if v:IsA("Model") and v.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
+            Booth = v
+            break
+        end
+    end
+
+    if Booth then
+        Booth.Info.Transactions.ChildAdded:Connect(function(transaction)
+            task.wait(0.5) -- Wait for values to load
+            local itemName = transaction:FindFirstChild("ItemName")
+            local price = transaction:FindFirstChild("Price")
+            local amount = transaction:FindFirstChild("Amount")
+            
+            if itemName and price and amount then
+                UpdateSold()
+                SendWebhook(itemName.Value, price.Value, amount.Value)
+            end
+        end)
+    end
+end
+
 UpdateStatus("Starting selling loop...")
 local function StartSelling()
+    SetupSalesListener() -- Start listening for actual sales
+    
     while task.wait(5) do 
         local BoothQueue = {}
         UpdateStatus("Scanning inventory...")
@@ -279,11 +298,6 @@ local function StartSelling()
             local success = pcall(function()
                 Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
             end)
-            
-            if success then
-                UpdateSold()
-                SendWebhook(v.Name, math.ceil(price), MaxAmount)
-            end
             
             task.wait(1)
         end
