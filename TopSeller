@@ -3,27 +3,27 @@ if not getgenv().ToppSeller then
     return
 end
 
--- UI Setup
+-- Create UI
 local ScreenGui = Instance.new("ScreenGui", game.Players.LocalPlayer.PlayerGui)
 ScreenGui.Name = "ToppSellerUI"
 ScreenGui.IgnoreGuiInset = true
-ScreenGui.ResetOnSpawn = false
 
 local Background = Instance.new("Frame", ScreenGui)
 Background.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 Background.BorderColor3 = Color3.fromRGB(255, 0, 255)
-Background.Size = UDim2.new(0.3, 0, 0.35, 0)
+Background.Size = UDim2.new(0.2, 0, 0.25, 0)
 Background.Position = UDim2.new(0.01, 0, 0.01, 0)
 Background.BorderMode = Enum.BorderMode.Inset
 
+-- Close button
 local CloseButton = Instance.new("TextButton", Background)
 CloseButton.Text = "X"
 CloseButton.Font = Enum.Font.FredokaOne
-CloseButton.TextSize = 20
+CloseButton.TextSize = 18
 CloseButton.TextColor3 = Color3.fromRGB(255, 0, 0)
 CloseButton.BackgroundTransparency = 1
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.Size = UDim2.new(0, 25, 0, 25)
+CloseButton.Position = UDim2.new(1, -25, 0, 0)
 CloseButton.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
@@ -34,80 +34,42 @@ Frame.Position = UDim2.new(0, 5, 0, 5)
 Frame.BackgroundTransparency = 1
 
 local ListLayout = Instance.new("UIListLayout", Frame)
-ListLayout.Padding = UDim.new(0, 10)
+ListLayout.Padding = UDim.new(0, 5)
 ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
+-- UI Elements
 local Title = Instance.new("TextLabel", Frame)
 Title.Text = "TOPP SELLER"
 Title.Font = Enum.Font.FredokaOne
-Title.TextSize = 24
+Title.TextSize = 18
 Title.TextColor3 = Color3.fromRGB(255, 0, 255)
 Title.BackgroundTransparency = 1
-Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Size = UDim2.new(1, 0, 0, 25)
 
 local TimerLabel = Instance.new("TextLabel", Frame)
 TimerLabel.Text = "00:00"
 TimerLabel.Font = Enum.Font.FredokaOne
-TimerLabel.TextSize = 20
+TimerLabel.TextSize = 16
 TimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TimerLabel.BackgroundTransparency = 1
-TimerLabel.Size = UDim2.new(1, 0, 0, 25)
+TimerLabel.Size = UDim2.new(1, 0, 0, 20)
 
 local StatusLabel = Instance.new("TextLabel", Frame)
 StatusLabel.Text = "Status: Initializing..."
 StatusLabel.Font = Enum.Font.FredokaOne
-StatusLabel.TextSize = 20
+StatusLabel.TextSize = 16
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Size = UDim2.new(1, 0, 0, 20)
 
 local SoldLabel = Instance.new("TextLabel", Frame)
 SoldLabel.Text = "Sold: 0"
 SoldLabel.Font = Enum.Font.FredokaOne
-SoldLabel.TextSize = 20
+SoldLabel.TextSize = 16
 SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 SoldLabel.BackgroundTransparency = 1
-SoldLabel.Size = UDim2.new(1, 0, 0, 25)
-
-local StatsFrame = Instance.new("Frame", Frame)
-StatsFrame.BackgroundTransparency = 1
-StatsFrame.Size = UDim2.new(1, 0, 0, 80)
-
-local StatsLayout = Instance.new("UIListLayout", StatsFrame)
-StatsLayout.Padding = UDim.new(0, 5)
-StatsLayout.FillDirection = Enum.FillDirection.Horizontal
-StatsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-local function CreateStat(name)
-    local statFrame = Instance.new("Frame", StatsFrame)
-    statFrame.BackgroundTransparency = 1
-    statFrame.Size = UDim2.new(0.5, -5, 0, 40)
-    
-    local label = Instance.new("TextLabel", statFrame)
-    label.Text = name
-    label.Font = Enum.Font.FredokaOne
-    label.TextSize = 16
-    label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.new(1, 0, 0.5, 0)
-    label.Position = UDim2.new(0, 0, 0, 0)
-    
-    local value = Instance.new("TextLabel", statFrame)
-    value.Name = "Value"
-    value.Text = "0"
-    value.Font = Enum.Font.FredokaOne
-    value.TextSize = 18
-    value.TextColor3 = Color3.fromRGB(255, 255, 255)
-    value.BackgroundTransparency = 1
-    value.Size = UDim2.new(1, 0, 0.5, 0)
-    value.Position = UDim2.new(0, 0, 0.5, 0)
-    
-    return value
-end
-
-local ListedStat = CreateStat("Listed:")
-local ProfitStat = CreateStat("Profit:")
+SoldLabel.Size = UDim2.new(1, 0, 0, 20)
 
 -- RGB Timer Effect
 local hue = 0
@@ -131,16 +93,12 @@ local function UpdateStatus(text)
 end
 
 local itemsSold = 0
-local totalProfit = 0
-local function UpdateSold(amount, price)
-    itemsSold = itemsSold + amount
-    totalProfit = totalProfit + (price * amount)
+local function UpdateSold()
+    itemsSold = itemsSold + 1
     SoldLabel.Text = "Sold: " .. itemsSold
-    ListedStat.Text = itemsSold
-    ProfitStat.Text = tostring(math.floor(totalProfit / 1e6)) .. "M"
 end
 
--- Game Functions
+-- Rest of your main script continues here...
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
@@ -184,71 +142,25 @@ if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     end
 end
 
-local function GetPetImage(petName)
-    local success, response = pcall(function()
-        return game:HttpGet("https://biggamesapi.io/api/collection/PSX/"..petName)
-    end)
+local function SendWebhook(ItemName, Price, Amount)
+    if getgenv().ToppSeller.Webhook == "" then return end
     
-    if success then
-        local data = game:GetService("HttpService"):JSONDecode(response)
-        if data and data.image then
-            return data.image
-        end
-    end
-    return "https://www.roblox.com/asset/?id=83339153494444"
-end
-
-local listedItems = {}
-local lastInventoryCount = {}
-
-local function CheckForSales()
-    local currentInventory = Savemod.Get().Inventory
-    if not currentInventory then return end
+    local data = {
+        ["content"] = "🎉 New Sale!",
+        ["embeds"] = {{
+            ["title"] = "**" .. ItemName .. "** sold!",
+            ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
+            ["color"] = 65280,
+            ["footer"] = {["text"] = "ToppSeller | " .. os.date("%X")}
+        }}
+    }
     
-    for petName, listedData in pairs(listedItems) do
-        local found = false
-        for _, pets in pairs(currentInventory) do
-            for _, pet in pairs(pets) do
-                if pet.id == petName then
-                    found = true
-                    break
-                end
-            end
-            if found then break end
-        end
-        
-        if not found then
-            local imageUrl = GetPetImage(petName)
-            local data = {
-                ["content"] = "🎉 Item Sold!",
-                ["embeds"] = {{
-                    ["title"] = "**" .. petName .. "** was purchased!",
-                    ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %d", listedData.price, listedData.amount),
-                    ["color"] = 65280,
-                    ["thumbnail"] = {["url"] = imageUrl},
-                    ["footer"] = {["text"] = "ToppSeller | " .. os.date("%X")}
-                }}
-            }
-            
-            request({
-                Url = getgenv().ToppSeller.Webhook,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = game:GetService("HttpService"):JSONEncode(data)
-            })
-            
-            UpdateSold(listedData.amount, listedData.price)
-            listedItems[petName] = nil
-        end
-    end
-    
-    lastInventoryCount = {}
-    for class, items in pairs(currentInventory) do
-        lastInventoryCount[class] = {}
-        for _, item in pairs(items) do
-            lastInventoryCount[class][item.id] = (lastInventoryCount[class][item.id] or 0) + (item._am or 1)
-        end
-    end
+    request({
+        Url = getgenv().ToppSeller.Webhook,
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = game:GetService("HttpService"):JSONEncode(data)
+    })
 end
 
 local GetRap = function(Class, ItemTable)
@@ -308,7 +220,7 @@ local function SetupAntiAFK()
         v:Disable() 
     end
     LocalPlayer.Idled:Connect(function() 
-        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000)) 
+        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) 
     end)
 
     local old
@@ -327,7 +239,7 @@ end
 
 UpdateStatus("Starting selling loop...")
 local function StartSelling()
-    while true do 
+    while task.wait(5) do 
         local BoothQueue = {}
         UpdateStatus("Scanning inventory...")
         local inventory = Savemod.Get().Inventory
@@ -367,36 +279,17 @@ local function StartSelling()
             end)
             
             if success then
-                listedItems[v.Name] = {
-                    price = math.ceil(price),
-                    amount = MaxAmount,
-                    time = os.time()
-                }
+                UpdateSold()
+                SendWebhook(v.Name, math.ceil(price), MaxAmount)
             end
             
             task.wait(1)
         end
-        
-        UpdateStatus("Checking for sales...")
-        CheckForSales()
-        
-        UpdateStatus("Waiting for next cycle...")
-        task.wait(30)
     end
 end
 
 if ClaimBooth() then
     SetupAntiAFK()
-    local inventory = Savemod.Get().Inventory
-    if inventory then
-        lastInventoryCount = {}
-        for class, items in pairs(inventory) do
-            lastInventoryCount[class] = {}
-            for _, item in pairs(items) do
-                lastInventoryCount[class][item.id] = (lastInventoryCount[class][item.id] or 0) + (item._am or 1)
-            end
-        end
-    end
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
