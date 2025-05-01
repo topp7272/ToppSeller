@@ -82,30 +82,34 @@ end)
 -- Core Variables
 local totalDiamonds = 0
 local lastDiamonds = 0
+local lastMinuteCheck = os.time()
 
--- Helper function to format numbers with commas
+-- Helper function to format numbers
 local function formatNumber(n)
     return tostring(n):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
 end
 
--- Webhook Function (Diamond Tracking)
-local function SendWebhook(amountGained)
+-- Webhook Function
+local function SendWebhook(title, value)
     if not getgenv().ToppSeller.Webhook then return end
     
+    local formattedValue = value >= 1000000 and string.format("%.1fm", value / 1000000) or tostring(value)
+    
     local data = {
-        ["content"] = "@everyone",
+        ["content"] = getgenv().ToppSeller.DiscordID and ("<@"..tostring(getgenv().ToppSeller.DiscordID)..">") or "",
         ["embeds"] = {{
-            ["title"] = "💎 DIAMONDS GAINED! 💎",
-            ["description"] = string.format("+ **%s** Diamonds\n\nTotal: **%s** Diamonds", 
-                formatNumber(amountGained), 
-                formatNumber(totalDiamonds)),
-            ["color"] = 5814783, -- Light blue color for diamonds
-            ["footer"] = {["text"] = "ToppSeller | "..os.date("%X")}
+            ["title"] = title,
+            ["image"] = { ["url"] = "https://cdn.discordapp.com/emojis/1062097221652328580.webp?size=160&animated=true" },
+            ["color"] = 5814783,
+            ["fields"] = {
+                { ["name"] = "Amount:", ["value"] = formattedValue, ["inline"] = true },
+                { ["name"] = "Player:", ["value"] = Players.LocalPlayer.Name, ["inline"] = true }
+            }
         }}
     }
     
     local success, response = pcall(function()
-        request({
+        (syn and syn.request or http_request or request)({
             Url = getgenv().ToppSeller.Webhook,
             Method = "POST",
             Headers = {["Content-Type"] = "application/json"},
@@ -120,11 +124,26 @@ end
 
 -- Diamond Tracker
 local function TrackDiamonds()
-    while task.wait(1) do
+    -- Get initial diamond count
+    local initialDiamonds = 0
+    local inventory = game:GetService("ReplicatedStorage").Library.Client.Save.Get().Inventory or {}
+    for _, currency in pairs(inventory.Currency or {}) do
+        if currency.id == "Diamonds" then
+            initialDiamonds = currency._am or 0
+            break
+        end
+    end
+    
+    SendWebhook("Initial Diamond Count", initialDiamonds)
+    lastDiamonds = initialDiamonds
+    totalDiamonds = initialDiamonds
+    SoldLabel.Text = "Diamonds: " .. formatNumber(initialDiamonds)
+    
+    -- Start tracking loop
+    while task.wait(0.1) do
         local currentDiamonds = 0
         local inventory = game:GetService("ReplicatedStorage").Library.Client.Save.Get().Inventory or {}
         
-        -- Find diamonds in currency
         for _, currency in pairs(inventory.Currency or {}) do
             if currency.id == "Diamonds" then
                 currentDiamonds = currency._am or 0
@@ -136,13 +155,13 @@ local function TrackDiamonds()
         totalDiamonds = currentDiamonds
         SoldLabel.Text = "Diamonds: " .. formatNumber(currentDiamonds)
 
-        -- Check for increase
-        if currentDiamonds > lastDiamonds and lastDiamonds > 0 then
-            local gained = currentDiamonds - lastDiamonds
-            SendWebhook(gained)
+        -- Check for minute interval
+        if os.time() - lastMinuteCheck >= 60 then
+            local gain = currentDiamonds - lastDiamonds
+            SendWebhook("Minute Diamond Gain", gain)
+            lastDiamonds = currentDiamonds
+            lastMinuteCheck = os.time()
         end
-
-        lastDiamonds = currentDiamonds
     end
 end
 
