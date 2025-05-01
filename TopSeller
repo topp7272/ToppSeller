@@ -1,19 +1,59 @@
-local Library = game.ReplicatedStorage.Library
-local Client = Library.Client
+-- Check if the config exists
+if not getgenv().ToppSeller then
+    warn("[ToppSeller] Config not found! Make sure you set getgenv().ToppSeller before loading this script")
+    return
+end
 
-local RAPCmds = require(Client.RAPCmds)
-local Network = require(Client.Network)
-local Savemod = require(Client.Save)
+-- Wait for game to load
+repeat task.wait() until game:IsLoaded()
+local LocalPlayer = game:GetService("Players").LocalPlayer
+repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
 
+-- Library setup
+local Library = game.ReplicatedStorage:FindFirstChild("Library")
+if not Library then
+    warn("[ToppSeller] Library not found in ReplicatedStorage!")
+    return
+end
+
+local Client = Library:FindFirstChild("Client")
+if not Client then
+    warn("[ToppSeller] Client folder not found in Library!")
+    return
+end
+
+-- Required modules
+local function requireModule(name)
+    local module = Client:FindFirstChild(name)
+    if not module then
+        warn("[ToppSeller] Missing module:", name)
+        return nil
+    end
+    return require(module)
+end
+
+local RAPCmds = requireModule("RAPCmds")
+local Network = requireModule("Network")
+local Savemod = requireModule("Save")
+
+if not (RAPCmds and Network and Savemod) then
+    return
+end
+
+-- Auto travel to trading plaza
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     while true do 
-        Network.Invoke("Travel to Trading Plaza") task.wait(1) 
+        Network.Invoke("Travel to Trading Plaza") 
+        task.wait(1) 
     end
 end
 
+-- Helper functions
 local GetRap = function(Class, ItemTable)
-    local Item = require(Library.Items[Class .. "Item"])(ItemTable.id)
-
+    local itemModule = Library.Items:FindFirstChild(Class .. "Item")
+    if not itemModule then return 0 end
+    
+    local Item = require(itemModule)(ItemTable.id)
     if ItemTable.sh then Item:SetShiny(true) end
     if ItemTable.pt == 1 then Item:SetGolden() end
     if ItemTable.pt == 2 then Item:SetRainbow() end
@@ -32,10 +72,16 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
--- Claim Booth If No Booth
-local HaveBooth = false
-while not HaveBooth do 
+-- Booth claiming system
+local function ClaimBooth()
+    local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
+    
+    if not BoothSpawns then
+        warn("[ToppSeller] No booth spawns found!")
+        return false
+    end
+
     for _, Booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
         if Booth:IsA("Model") and Booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
             HaveBooth = true
@@ -43,46 +89,83 @@ while not HaveBooth do
             break
         end
     end
+
     if not HaveBooth then
         LocalPlayer.Character.HumanoidRootPart.CFrame = BoothSpawns.Table.CFrame * CFrame.new(5, 0, 0)
         Network.Invoke("Booths_ClaimBooth", tostring(BoothSpawns:GetAttribute("ID")))
+        task.wait(2) -- Give time for booth to be claimed
     end
+    
+    return true
 end
 
--- Anti disconnect
-local VirtualUser = game:GetService("VirtualUser")
-for _, v in pairs(getconnections(LocalPlayer.Idled)) do v:Disable() end
-LocalPlayer.Idled:Connect(function() VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) end)
-
-old = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if not checkcaller() then
-        local Name = tostring(self)
-        if table.find({"Server Closing", "Idle Tracking: Update Timer", "Move Server"}, Name) then
-            return nil
-        end
+-- Anti-AFK and disconnect prevention
+local function SetupAntiAFK()
+    local VirtualUser = game:GetService("VirtualUser")
+    for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
+        v:Disable() 
     end
-    return old(self, ...)
-end)
-Network.Fire("Idle Tracking: Stop Timer")
+    LocalPlayer.Idled:Connect(function() 
+        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) 
+    end)
 
--- Sell Pets & Stuff
-while task.wait(5) do 
-    local BoothQueue = {}
-    for Class, Items in pairs(Savemod.Get().Inventory) do
-        if ToppSeller.Items[Class] then
-            for _, v in pairs(Items) do
-                local Item = ToppSeller.Items[Class][v.id]
-                if Item and Item.pt == v.pt and Item.sh == v.sh and Item.tn == v.tn then
-                    table.insert(BoothQueue, {Price = Item.Price, UUID = _, Item = v, Rap = GetRap(Class, v)})
+    local old
+    old = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if not checkcaller() then
+            local Name = tostring(self)
+            if table.find({"Server Closing", "Idle Tracking: Update Timer", "Move Server"}, Name) then
+                return nil
+            end
+        end
+        return old(self, ...)
+    end)
+    Network.Fire("Idle Tracking: Stop Timer")
+end
+
+-- Main selling loop
+local function StartSelling()
+    while task.wait(5) do 
+        local BoothQueue = {}
+        local inventory = Savemod.Get().Inventory
+        
+        if not inventory then
+            warn("[ToppSeller] Failed to get inventory!")
+            task.wait(10)
+            continue
+        end
+
+        for Class, Items in pairs(inventory) do
+            if getgenv().ToppSeller.Items[Class] then
+                for _, v in pairs(Items) do
+                    local configItem = getgenv().ToppSeller.Items[Class][v.id]
+                    if configItem and configItem.pt == v.pt and configItem.sh == v.sh and configItem.tn == v.tn then
+                        table.insert(BoothQueue, {
+                            Price = configItem.Price, 
+                            UUID = _, 
+                            Item = v, 
+                            Rap = GetRap(Class, v)
+                        })
+                    end
                 end
             end
         end
+
+        table.sort(BoothQueue, function(a, b) return a.Rap > b.Rap end)
+        
+        for _, v in ipairs(BoothQueue) do
+            local price = ConvertPrice(v.Price, v.Rap)
+            local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / price))
+            Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
+            task.wait(1)
+        end
     end
-    table.sort(BoothQueue, function(a, b) return a.Rap > b.Rap end)
-    
-    for _, v in ipairs(BoothQueue) do
-        local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / ConvertPrice(v.Price, v.Rap)))
-        Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(ConvertPrice(v.Price, v.Rap)), MaxAmount) task.wait(1)
-    end
+end
+
+-- Initialize
+if ClaimBooth() then
+    SetupAntiAFK()
+    StartSelling()
+else
+    warn("[ToppSeller] Failed to claim booth!")
 end
