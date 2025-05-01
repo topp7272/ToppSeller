@@ -3,7 +3,13 @@ if not getgenv().ToppSeller then
     return
 end
 
-local ScreenGui = Instance.new("ScreenGui", game.Players.LocalPlayer.PlayerGui)
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+-- UI Setup
+local ScreenGui = Instance.new("ScreenGui", Players.LocalPlayer.PlayerGui)
 ScreenGui.Name = "ToppSellerUI"
 ScreenGui.IgnoreGuiInset = true
 
@@ -61,41 +67,43 @@ SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 SoldLabel.BackgroundTransparency = 1
 SoldLabel.Size = UDim2.new(1, 0, 0, 40)
 
+-- Timer Effects
 local hue = 0
+local startTime = os.time()
+
 game:GetService("RunService").Heartbeat:Connect(function(delta)
     hue = (hue + delta * 60) % 360
     TimerLabel.TextColor3 = Color3.fromHSV(hue/360, 1, 1)
-end)
-
-local startTime = os.time()
-game:GetService("RunService").Heartbeat:Connect(function()
+    
     local elapsed = os.time() - startTime
-    local minutes = math.floor(elapsed / 60)
-    local seconds = elapsed % 60
-    TimerLabel.Text = string.format("%02d:%02d", minutes, seconds)
+    TimerLabel.Text = string.format("%02d:%02d", math.floor(elapsed/60), elapsed%60)
 end)
 
+-- Core Variables
 local itemsSold = 0
-local function UpdateSold()
-    itemsSold = itemsSold + 1
-    SoldLabel.Text = "Sold: " .. itemsSold
-end
+local lastCounts = {}
 
+-- Webhook Function
 local function SendWebhook(ItemName, Price, Amount)
-    if getgenv().ToppSeller.Webhook == "" then return end
+    if not getgenv().ToppSeller.Webhook then return end
     
     local data = {
         ["content"] = "@everyone",
         ["embeds"] = {{
             ["title"] = "**"..ItemName.."** SOLD!",
-            ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
+            ["description"] = string.format("💰 **Price:** %s\n🔢 **Amount:** %s", Price, Amount),
             ["color"] = 65280,
             ["footer"] = {["text"] = "ToppSeller | "..os.date("%X")}
         }}
     }
     
     local success, response = pcall(function()
-        return game:HttpGet(getgenv().ToppSeller.Webhook.."?data="..game:GetService("HttpService"):JSONEncode(data), true)
+        request({
+            Url = getgenv().ToppSeller.Webhook,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode(data)
+        })
     end)
     
     if not success then
@@ -103,87 +111,66 @@ local function SendWebhook(ItemName, Price, Amount)
     end
 end
 
-local function SetupSalesTracker()
-    local lastCount = 0
-    local myBooth = nil
-    
-    local function findMyBooth()
-        for _, booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == game.Players.LocalPlayer.DisplayName.."'s Booth!" then
-                return booth
+-- Inventory Tracker (Precise Count System)
+local function TrackItemCounts()
+    while task.wait(0.5) do
+        local currentCounts = {}
+        local inventory = game:GetService("ReplicatedStorage").Library.Client.Save.Get().Inventory or {}
+        
+        -- Initialize counts for all configured pets
+        for petName, _ in pairs(getgenv().ToppSeller.Items.Pet or {}) do
+            currentCounts[petName] = 0
+        end
+
+        -- Count current inventory
+        for _, item in pairs(inventory.Pet or {}) do
+            if getgenv().ToppSeller.Items.Pet[item.id] then
+                currentCounts[item.id] = (currentCounts[item.id] or 0) + (item._am or 1)
             end
         end
-        return nil
-    end
-    
-    while task.wait(1) do
-        myBooth = findMyBooth()
-        if myBooth then
-            local currentCount = #myBooth.Info.Transactions:GetChildren()
-            if currentCount > lastCount then
-                local difference = currentCount - lastCount
-                for i = 1, difference do
-                    UpdateSold()
-                    local transaction = myBooth.Info.Transactions:FindFirstChild(tostring(lastCount + i))
-                    if transaction then
-                        local itemName = transaction:WaitForChild("ItemName", 3)
-                        local price = transaction:WaitForChild("Price", 3)
-                        local amount = transaction:WaitForChild("Amount", 3)
-                        if itemName and price and amount then
-                            SendWebhook(itemName.Value, price.Value, amount.Value)
-                        end
-                    end
-                end
-                lastCount = currentCount
+
+        -- Detect sales by count difference
+        for petName, currentAmount in pairs(currentCounts) do
+            local lastAmount = lastCounts[petName] or currentAmount
+            if currentAmount < lastAmount then
+                local soldCount = lastAmount - currentAmount
+                local config = getgenv().ToppSeller.Items.Pet[petName]
+                local price = type(config.Price) == "string" 
+                    and (tonumber(config.Price:match("(%d+)%%"))/100) * GetRap("Pet", {id = petName}) 
+                    or config.Price
+                
+                SendWebhook(petName, math.floor(price), soldCount)
+                UpdateSold(soldCount)
             end
-        else
-            lastCount = 0
         end
+
+        lastCounts = currentCounts
     end
 end
 
+local function UpdateSold(amount)
+    itemsSold = itemsSold + (amount or 1)
+    SoldLabel.Text = "Sold: " .. itemsSold
+end
+
+-- Game Setup
 repeat task.wait() until game:IsLoaded()
-local LocalPlayer = game:GetService("Players").LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
 
-local Library = game.ReplicatedStorage:FindFirstChild("Library")
-if not Library then
-    warn("[ToppSeller] Library not found!")
-    return
-end
-
-local Client = Library:FindFirstChild("Client")
-if not Client then
-    warn("[ToppSeller] Client folder not found!")
-    return
-end
+local Library = ReplicatedStorage:WaitForChild("Library")
+local Client = Library:WaitForChild("Client")
 
 local function requireModule(name)
-    local module = Client:FindFirstChild(name)
-    if not module then
-        warn("[ToppSeller] Missing module:", name)
-        return nil
-    end
-    return require(module)
+    return require(Client:WaitForChild(name))
 end
 
 local RAPCmds = requireModule("RAPCmds")
 local Network = requireModule("Network")
-local Savemod = requireModule("Save")
+local SaveMod = requireModule("Save")
 
-if not (RAPCmds and Network and Savemod) then
-    return
-end
-
-if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
-    while true do 
-        Network.Invoke("Travel to Trading Plaza") 
-        task.wait(1) 
-    end
-end
-
-local GetRap = function(Class, ItemTable)
-    local itemModule = Library.Items:FindFirstChild(Class .. "Item")
+local function GetRap(Class, ItemTable)
+    local itemModule = Library.Items:FindFirstChild(Class.."Item")
     if not itemModule then return 0 end
     
     local Item = require(itemModule)(ItemTable.id)
@@ -195,111 +182,63 @@ local GetRap = function(Class, ItemTable)
     return RAPCmds.Get(Item) or 0
 end
 
-local ConvertPrice = function(Price, Rap)
+local function ConvertPrice(Price, Rap)
     if type(Price) == "string" then
         local Percentage = tonumber(Price:match("^(%d+)%%"))
-        if Percentage then
-            return (Percentage / 100) * Rap
-        end
+        if Percentage then return (Percentage/100)*Rap end
     end
     return Price
 end
 
 local function ClaimBooth()
-    local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
-    
-    if not BoothSpawns then
-        warn("[ToppSeller] No booth spawns found!")
-        return false
-    end
+    if not BoothSpawns then return false end
 
     for _, Booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-        if Booth:IsA("Model") and Booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
-            HaveBooth = true
-            LocalPlayer.Character.HumanoidRootPart.CFrame = Booth.Table.CFrame * CFrame.new(5, 0, 0)
-            break
+        if Booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName.."'s Booth!" then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = Booth.Table.CFrame * CFrame.new(5,0,0)
+            return true
         end
     end
 
-    if not HaveBooth then
-        LocalPlayer.Character.HumanoidRootPart.CFrame = BoothSpawns.Table.CFrame * CFrame.new(5, 0, 0)
-        Network.Invoke("Booths_ClaimBooth", tostring(BoothSpawns:GetAttribute("ID")))
-        task.wait(2)
-    end
-    
+    LocalPlayer.Character.HumanoidRootPart.CFrame = BoothSpawns.Table.CFrame * CFrame.new(5,0,0)
+    Network.Invoke("Booths_ClaimBooth", tostring(BoothSpawns:GetAttribute("ID")))
+    task.wait(2)
     return true
 end
 
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
-    for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
-        v:Disable() 
-    end
-    LocalPlayer.Idled:Connect(function() 
-        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) 
+    for _, v in pairs(getconnections(LocalPlayer.Idled)) do v:Disable() end
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:ClickButton2(Vector2.new(math.random(0,1000), math.random(0,1000)))
     end)
-
-    local old
-    old = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        if not checkcaller() then
-            local Name = tostring(self)
-            if table.find({"Server Closing", "Idle Tracking: Update Timer", "Move Server"}, Name) then
-                return nil
-            end
-        end
-        return old(self, ...)
-    end)
-    Network.Fire("Idle Tracking: Stop Timer")
 end
 
 local function StartSelling()
-    while task.wait(5) do 
-        local BoothQueue = {}
-        local inventory = Savemod.Get().Inventory
-        
-        if not inventory then
-            warn("[ToppSeller] Failed to get inventory!")
-            task.wait(10)
-            continue
-        end
+    while task.wait(5) do
+        local inventory = SaveMod.Get().Inventory
+        if not inventory then continue end
 
-        for Class, Items in pairs(inventory) do
-            if getgenv().ToppSeller.Items[Class] then
-                for _, v in pairs(Items) do
-                    local configItem = getgenv().ToppSeller.Items[Class][v.id]
-                    if configItem and configItem.pt == v.pt and configItem.sh == v.sh and configItem.tn == v.tn then
-                        table.insert(BoothQueue, {
-                            Name = v.id,
-                            Price = configItem.Price, 
-                            UUID = _, 
-                            Item = v, 
-                            Rap = GetRap(Class, v)
-                        })
-                    end
-                end
+        for uid, item in pairs(inventory.Pet or {}) do
+            local config = getgenv().ToppSeller.Items.Pet[item.id]
+            if config then
+                local price = ConvertPrice(config.Price, GetRap("Pet", item))
+                local maxAmount = math.min(item._am or 1, 15000, math.floor(25e9/price))
+                
+                pcall(function()
+                    Network.Invoke("Booths_CreateListing", uid, math.ceil(price), maxAmount)
+                end)
+                task.wait(1)
             end
-        end
-
-        table.sort(BoothQueue, function(a, b) return a.Rap > b.Rap end)
-        
-        for _, v in ipairs(BoothQueue) do
-            local price = ConvertPrice(v.Price, v.Rap)
-            local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / price))
-            
-            local success = pcall(function()
-                Network.Invoke("Booths_CreateListing", v.UUID, math.ceil(price), MaxAmount)
-            end)
-            
-            task.wait(1)
         end
     end
 end
 
+-- Main Execution
 if ClaimBooth() then
     SetupAntiAFK()
-    coroutine.wrap(SetupSalesTracker)()
+    coroutine.wrap(TrackItemCounts)()
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
