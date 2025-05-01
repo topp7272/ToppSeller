@@ -3,9 +3,107 @@ if not getgenv().ToppSeller then
     return
 end
 
+-- Create UI
+local ScreenGui = Instance.new("ScreenGui", game.Players.LocalPlayer.PlayerGui)
+ScreenGui.Name = "ToppSellerUI"
+ScreenGui.IgnoreGuiInset = true
+
+local Background = Instance.new("Frame", ScreenGui)
+Background.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Background.BorderColor3 = Color3.fromRGB(255, 0, 255)
+Background.Size = UDim2.new(0.2, 0, 0.25, 0)
+Background.Position = UDim2.new(0.01, 0, 0.01, 0)
+Background.BorderMode = Enum.BorderMode.Inset
+
+-- Close button
+local CloseButton = Instance.new("TextButton", Background)
+CloseButton.Text = "X"
+CloseButton.Font = Enum.Font.FredokaOne
+CloseButton.TextSize = 18
+CloseButton.TextColor3 = Color3.fromRGB(255, 0, 0)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Size = UDim2.new(0, 25, 0, 25)
+CloseButton.Position = UDim2.new(1, -25, 0, 0)
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+local Frame = Instance.new("Frame", Background)
+Frame.Size = UDim2.new(1, -10, 1, -10)
+Frame.Position = UDim2.new(0, 5, 0, 5)
+Frame.BackgroundTransparency = 1
+
+local ListLayout = Instance.new("UIListLayout", Frame)
+ListLayout.Padding = UDim.new(0, 5)
+ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- UI Elements
+local Title = Instance.new("TextLabel", Frame)
+Title.Text = "TOPP SELLER"
+Title.Font = Enum.Font.FredokaOne
+Title.TextSize = 18
+Title.TextColor3 = Color3.fromRGB(255, 0, 255)
+Title.BackgroundTransparency = 1
+Title.Size = UDim2.new(1, 0, 0, 25)
+
+local TimerLabel = Instance.new("TextLabel", Frame)
+TimerLabel.Text = "00:00"
+TimerLabel.Font = Enum.Font.FredokaOne
+TimerLabel.TextSize = 16
+TimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TimerLabel.BackgroundTransparency = 1
+TimerLabel.Size = UDim2.new(1, 0, 0, 20)
+
+local StatusLabel = Instance.new("TextLabel", Frame)
+StatusLabel.Text = "Status: Initializing..."
+StatusLabel.Font = Enum.Font.FredokaOne
+StatusLabel.TextSize = 16
+StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Size = UDim2.new(1, 0, 0, 20)
+
+local SoldLabel = Instance.new("TextLabel", Frame)
+SoldLabel.Text = "Sold: 0"
+SoldLabel.Font = Enum.Font.FredokaOne
+SoldLabel.TextSize = 16
+SoldLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SoldLabel.BackgroundTransparency = 1
+SoldLabel.Size = UDim2.new(1, 0, 0, 20)
+
+-- RGB Timer Effect
+local hue = 0
+game:GetService("RunService").Heartbeat:Connect(function(delta)
+    hue = (hue + delta * 60) % 360
+    TimerLabel.TextColor3 = Color3.fromHSV(hue/360, 1, 1)
+end)
+
+-- Timer Functionality
+local startTime = os.time()
+game:GetService("RunService").Heartbeat:Connect(function()
+    local elapsed = os.time() - startTime
+    local minutes = math.floor(elapsed / 60)
+    local seconds = elapsed % 60
+    TimerLabel.Text = string.format("%02d:%02d", minutes, seconds)
+end)
+
+-- Update Functions
+local function UpdateStatus(text)
+    StatusLabel.Text = "Status: " .. text
+end
+
+local itemsSold = 0
+local function UpdateSold()
+    itemsSold = itemsSold + 1
+    SoldLabel.Text = "Sold: " .. itemsSold
+end
+
+-- Rest of your main script continues here...
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
+
+UpdateStatus("Loading libraries...")
 
 local Library = game.ReplicatedStorage:FindFirstChild("Library")
 if not Library then
@@ -37,6 +135,7 @@ if not (RAPCmds and Network and Savemod) then
 end
 
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
+    UpdateStatus("Traveling to plaza...")
     while true do 
         Network.Invoke("Travel to Trading Plaza") 
         task.wait(1) 
@@ -87,6 +186,7 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
+UpdateStatus("Claiming booth...")
 local function ClaimBooth()
     local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
@@ -113,13 +213,14 @@ local function ClaimBooth()
     return true
 end
 
+UpdateStatus("Setting up anti-AFK...")
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
         v:Disable() 
     end
     LocalPlayer.Idled:Connect(function() 
-        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000)) 
+        VirtualUser:ClickButton2(Vector2.new(math.random(0, 1000), math.random(0, 1000))) 
     end)
 
     local old
@@ -136,9 +237,11 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
+UpdateStatus("Starting selling loop...")
 local function StartSelling()
     while task.wait(5) do 
         local BoothQueue = {}
+        UpdateStatus("Scanning inventory...")
         local inventory = Savemod.Get().Inventory
         
         if not inventory then
@@ -166,6 +269,7 @@ local function StartSelling()
 
         table.sort(BoothQueue, function(a, b) return a.Rap > b.Rap end)
         
+        UpdateStatus("Listing items...")
         for _, v in ipairs(BoothQueue) do
             local price = ConvertPrice(v.Price, v.Rap)
             local MaxAmount = math.min(v.Item._am or 1, 15000, math.floor(25e9 / price))
@@ -175,6 +279,7 @@ local function StartSelling()
             end)
             
             if success then
+                UpdateSold()
                 SendWebhook(v.Name, math.ceil(price), MaxAmount)
             end
             
