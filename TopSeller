@@ -84,62 +84,74 @@ local function UpdateSold(amount)
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
+-- Improved webhook system
 local function SendWebhook(ItemName, Price, Amount)
     if getgenv().ToppSeller.Webhook == "" then return end
     
     local data = {
         ["content"] = "🎉 New Sale!",
         ["embeds"] = {{
-            ["title"] = "**" .. ItemName .. "** sold!",
+            ["title"] = "**"..ItemName.."** sold!",
             ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
             ["color"] = 65280,
-            ["footer"] = {["text"] = "ToppSeller | " .. os.date("%X")}
+            ["footer"] = {["text"] = "ToppSeller | "..os.date("%X")}
         }}
     }
     
-    request({
-        Url = getgenv().ToppSeller.Webhook,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = game:GetService("HttpService"):JSONEncode(data)
-    })
+    local success, err = pcall(function()
+        return request({
+            Url = getgenv().ToppSeller.Webhook,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = game:GetService("HttpService"):JSONEncode(data)
+        })
+    end)
+    
+    if not success then
+        warn("Webhook failed:", err)
+    end
 end
 
--- Listen for booth transactions
-local function SetupBoothListener()
-    local function findMyBooth()
-        for _, booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName .. "'s Booth!" then
-                return booth
+-- Inventory tracking for sales detection
+local lastInventory = {}
+local function TrackSales()
+    while task.wait(5) do
+        local currentInventory = Savemod.Get().Inventory or {}
+        
+        for class, items in pairs(lastInventory) do
+            if getgenv().ToppSeller.Items[class] then
+                for uuid, item in pairs(items) do
+                    if not currentInventory[class] or not currentInventory[class][uuid] or currentInventory[class][uuid]._am < item._am then
+                        local configItem = getgenv().ToppSeller.Items[class][item.id]
+                        if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
+                            local price = ConvertPrice(configItem.Price, GetRap(class, item))
+                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uuid] and currentInventory[class][uuid]._am or 0)
+                            if amountSold > 0 then
+                                UpdateSold(amountSold)
+                                SendWebhook(item.id, math.ceil(price), amountSold)
+                            end
+                        end
+                    end
+                end
             end
         end
-        return nil
-    end
-
-    while task.wait(5) do
-        local myBooth = findMyBooth()
-        if myBooth then
-            myBooth.Info.Transactions.ChildAdded:Connect(function(transaction)
-                task.wait(0.5) -- Wait for values to load
-                local itemName = transaction:FindFirstChild("ItemName")
-                local price = transaction:FindFirstChild("Price")
-                local amount = transaction:FindFirstChild("Amount")
-                
-                if itemName and price and amount then
-                    UpdateSold(amount.Value)
-                    SendWebhook(itemName.Value, price.Value, amount.Value)
-                end
-            end)
-            break
+        
+        lastInventory = {}
+        for class, items in pairs(currentInventory) do
+            lastInventory[class] = {}
+            for uuid, item in pairs(items) do
+                lastInventory[class][uuid] = table.clone(item)
+            end
         end
     end
 end
 
--- [REST OF YOUR ORIGINAL SCRIPT FOLLOWS EXACTLY AS BEFORE]
+-- Wait for game to load
 repeat task.wait() until game:IsLoaded()
 local LocalPlayer = game:GetService("Players").LocalPlayer
 repeat task.wait() until LocalPlayer and not LocalPlayer.PlayerGui:FindFirstChild("__INTRO")
 
+-- Load required modules
 local Library = game.ReplicatedStorage:FindFirstChild("Library")
 if not Library then
     warn("[ToppSeller] Library not found!")
@@ -169,6 +181,7 @@ if not (RAPCmds and Network and Savemod) then
     return
 end
 
+-- Travel to plaza if needed
 if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     while true do 
         Network.Invoke("Travel to Trading Plaza") 
@@ -176,6 +189,7 @@ if game.PlaceId == 8737899170 or game.PlaceId == 16498369169 then
     end
 end
 
+-- RAP calculation
 local GetRap = function(Class, ItemTable)
     local itemModule = Library.Items:FindFirstChild(Class .. "Item")
     if not itemModule then return 0 end
@@ -189,6 +203,7 @@ local GetRap = function(Class, ItemTable)
     return RAPCmds.Get(Item) or 0
 end
 
+-- Price conversion
 local ConvertPrice = function(Price, Rap)
     if type(Price) == "string" then
         local Percentage = tonumber(Price:match("^(%d+)%%"))
@@ -199,6 +214,7 @@ local ConvertPrice = function(Price, Rap)
     return Price
 end
 
+-- Booth claiming
 local function ClaimBooth()
     local HaveBooth = false
     local BoothSpawns = game.workspace.TradingPlaza.BoothSpawns:FindFirstChildWhichIsA("Model")
@@ -225,6 +241,7 @@ local function ClaimBooth()
     return true
 end
 
+-- Anti-AFK
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     for _, v in pairs(getconnections(LocalPlayer.Idled)) do 
@@ -248,7 +265,10 @@ local function SetupAntiAFK()
     Network.Fire("Idle Tracking: Stop Timer")
 end
 
+-- Main selling function
 local function StartSelling()
+    lastInventory = Savemod.Get().Inventory or {}
+    
     while task.wait(5) do 
         local BoothQueue = {}
         local inventory = Savemod.Get().Inventory
@@ -291,10 +311,11 @@ local function StartSelling()
     end
 end
 
+-- Start everything
 if ClaimBooth() then
     SetupAntiAFK()
-    coroutine.wrap(SetupBoothListener)() -- Start listening for sales
-    StartSelling() -- Start original selling process
+    coroutine.wrap(TrackSales)()
+    StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
 end
