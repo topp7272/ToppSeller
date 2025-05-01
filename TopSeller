@@ -76,120 +76,68 @@ game:GetService("RunService").Heartbeat:Connect(function()
 end)
 
 local itemsSold = 0
-local function UpdateSold(amount)
-    itemsSold = itemsSold + (amount or 1)
+local function UpdateSold()
+    itemsSold = itemsSold + 1
     SoldLabel.Text = "Sold: " .. itemsSold
 end
 
-local lastWebhookSent = {}
 local function SendWebhook(ItemName, Price, Amount)
     if getgenv().ToppSeller.Webhook == "" then return end
     
-    local key = ItemName..tostring(Price)..tostring(Amount)
-    if lastWebhookSent[key] and (os.time() - lastWebhookSent[key]) < 10 then
-        return
-    end
-    lastWebhookSent[key] = os.time()
-    
     local data = {
-        ["content"] = "🎉 New Sale!",
+        ["content"] = "@everyone",
         ["embeds"] = {{
-            ["title"] = "**"..ItemName.."** sold!",
+            ["title"] = "**"..ItemName.."** SOLD!",
             ["description"] = string.format("💰 **Price:** %s \n🔢 **Amount:** %s", Price, Amount),
             ["color"] = 65280,
             ["footer"] = {["text"] = "ToppSeller | "..os.date("%X")}
         }}
     }
     
-    local success, err = pcall(function()
-        request({
-            Url = getgenv().ToppSeller.Webhook,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = game:GetService("HttpService"):JSONEncode(data)
-        })
+    local success, response = pcall(function()
+        return game:HttpGet(getgenv().ToppSeller.Webhook.."?data="..game:GetService("HttpService"):JSONEncode(data), true)
     end)
     
     if not success then
-        warn("Webhook failed:", err)
+        warn("Webhook failed:", response)
     end
 end
 
-local listedItems = {}
-local function TrackListings()
-    local function getMyBooth()
+local function SetupSalesTracker()
+    local lastCount = 0
+    local myBooth = nil
+    
+    local function findMyBooth()
         for _, booth in ipairs(workspace.__THINGS.Booths:GetChildren()) do
-            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == LocalPlayer.DisplayName.."'s Booth!" then
+            if booth:IsA("Model") and booth.Info.BoothBottom.Frame.Top.Text == game.Players.LocalPlayer.DisplayName.."'s Booth!" then
                 return booth
             end
         end
         return nil
     end
-
-    while task.wait(0.5) do
-        local myBooth = getMyBooth()
+    
+    while task.wait(1) do
+        myBooth = findMyBooth()
         if myBooth then
-            local currentListings = {}
-            for _, listing in ipairs(myBooth.Info.Listings:GetChildren()) do
-                if listing:FindFirstChild("ItemUID") then
-                    currentListings[listing.ItemUID.Value] = true
-                end
-            end
-            
-            for uid, _ in pairs(listedItems) do
-                if not currentListings[uid] then
-                    local itemData = Savemod.Get().Inventory
-                    for class, items in pairs(itemData) do
-                        if items[uid] then
-                            local item = items[uid]
-                            local configItem = getgenv().ToppSeller.Items[class][item.id]
-                            if configItem then
-                                local price = ConvertPrice(configItem.Price, GetRap(class, item))
-                                UpdateSold(1)
-                                SendWebhook(item.id, math.ceil(price), 1)
-                            end
-                        end
-                    end
-                    listedItems[uid] = nil
-                end
-            end
-            
-            for uid, _ in pairs(currentListings) do
-                listedItems[uid] = true
-            end
-        end
-    end
-end
-
-local lastInventory = {}
-local function TrackInventoryChanges()
-    while task.wait(0.5) do
-        local currentInventory = Savemod.Get().Inventory or {}
-        
-        for class, items in pairs(lastInventory) do
-            if getgenv().ToppSeller.Items[class] then
-                for uid, item in pairs(items) do
-                    if not currentInventory[class] or not currentInventory[class][uid] or currentInventory[class][uid]._am < item._am then
-                        local configItem = getgenv().ToppSeller.Items[class][item.id]
-                        if configItem and configItem.pt == item.pt and configItem.sh == item.sh and configItem.tn == item.tn then
-                            local price = ConvertPrice(configItem.Price, GetRap(class, item))
-                            local amountSold = item._am - (currentInventory[class] and currentInventory[class][uid] and currentInventory[class][uid]._am or 0)
-                            if amountSold > 0 then
-                                UpdateSold(amountSold)
-                                SendWebhook(item.id, math.ceil(price), amountSold)
-                            end
+            local currentCount = #myBooth.Info.Transactions:GetChildren()
+            if currentCount > lastCount then
+                local difference = currentCount - lastCount
+                for i = 1, difference do
+                    UpdateSold()
+                    local transaction = myBooth.Info.Transactions:FindFirstChild(tostring(lastCount + i))
+                    if transaction then
+                        local itemName = transaction:WaitForChild("ItemName", 3)
+                        local price = transaction:WaitForChild("Price", 3)
+                        local amount = transaction:WaitForChild("Amount", 3)
+                        if itemName and price and amount then
+                            SendWebhook(itemName.Value, price.Value, amount.Value)
                         end
                     end
                 end
+                lastCount = currentCount
             end
-        end
-        
-        lastInventory = {}
-        for class, items in pairs(currentInventory) do
-            lastInventory[class] = {}
-            for uid, item in pairs(items) do
-                lastInventory[class][uid] = table.clone(item)
-            end
+        else
+            lastCount = 0
         end
     end
 end
@@ -307,8 +255,6 @@ local function SetupAntiAFK()
 end
 
 local function StartSelling()
-    lastInventory = Savemod.Get().Inventory or {}
-    
     while task.wait(5) do 
         local BoothQueue = {}
         local inventory = Savemod.Get().Inventory
@@ -353,8 +299,7 @@ end
 
 if ClaimBooth() then
     SetupAntiAFK()
-    coroutine.wrap(TrackListings)()
-    coroutine.wrap(TrackInventoryChanges)()
+    coroutine.wrap(SetupSalesTracker)()
     StartSelling()
 else
     warn("[ToppSeller] Failed to claim booth!")
